@@ -400,4 +400,4 @@ NEW → MONITORING → CANCELLING → TRAILING → (closed)
 
 > Experienced in Interactive Brokers API, algorithmic trading bots, ib_insync, TWS API, IB Gateway automation, Python trading systems, and cloud deployment on Azure / AWS.
 > Available for custom IBKR bot development — risk management, order execution, portfolio automation, and more.
-<!-- updated: 2024-07-13-r01 -->
+<!-- updated: 2024-10-31-r01 -->
