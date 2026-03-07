@@ -1,0 +1,22 @@
+# IBKR Risk Management Bot - Configuration
+# Copy this file and adjust values for your environment.
+
+ibkr:
+  host: "127.0.0.1"       # IB Gateway host (use 127.0.0.1 when bot runs on same machine)
+  port: 4002               # 4001 = live, 4002 = paper trading
+  client_id: 1             # Unique client ID; change if you run multiple bots
+
+risk:
+  tp_pct: 7.0              # Take Profit percent above entry
+  sl_pct: 15.0             # Stop Loss percent below entry
+  trigger_pct: 5.0         # Price gain % at which TP/SL are replaced with trailing stop
+  trail_pct: 2.0           # Trailing Stop percent
+
+bot:
+  poll_interval: 5         # Seconds between portfolio scans
+  reconnect_delay: 30      # Seconds to wait before reconnecting after disconnect
+  order_timeout: 30        # Seconds to wait for order cancel confirmation
+
+logging:
+  level: "INFO"            # DEBUG | INFO | WARNING | ERROR
+  file: "bot.log"          # Set to null to disable file logging
