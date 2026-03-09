@@ -444,6 +444,6 @@ class RiskBot:
         if position.position == 0:
             conid = position.contract.conId
             if conid in self._positions:
-                log.info(
-                    "Position closed via event: %s", position.contract.symbol
-                )
+                mp = self._positions.pop(conid)
+                self._cancel_market_data(conid)
+                log.info("Position closed via event: %s", position.contract.symbol)
