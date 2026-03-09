@@ -64,7 +64,10 @@ class RiskBot:
         bot can manage positions that were already open before it started.
         """
         self.ib.reqPositions()
-        await asyncio.sleep(1)
+        # reqAllOpenOrders fetches orders from ALL sessions (not just the current
+        # one), which is required to detect TP/SL orders placed before a restart.
+        self.ib.reqAllOpenOrders()
+        await asyncio.sleep(2)
 
         open_trades = self.ib.openTrades()
         trades_by_conid: Dict[int, list] = {}
@@ -189,7 +192,7 @@ class RiskBot:
             ocaGroup      = oca_group,
             ocaType       = 1,      # cancel with block
             tif           = "GTC",
-            transmit      = False,  # hold until SL is sent
+            transmit      = True,
         )
         sl_order = Order(
             action        = mp.close_action,
@@ -199,7 +202,7 @@ class RiskBot:
             ocaGroup      = oca_group,
             ocaType       = 1,
             tif           = "GTC",
-            transmit      = True,   # transmits both orders together
+            transmit      = True,
         )
 
         tp_trade = self.ib.placeOrder(contract, tp_order)
@@ -224,45 +227,82 @@ class RiskBot:
         """Cancel TP then SL (with confirmation), then place trailing stop."""
 
         if not mp.tp_cancelled:
-            log.info("%s: Cancelling TP order %d…", mp.symbol, mp.tp_order_id)
-            tp_trade = self._find_trade(mp.tp_order_id)
-            if tp_trade:
-                self.ib.cancelOrder(tp_trade.order)
-                if await self._wait_cancel(mp.tp_order_id):
-                    mp.tp_cancelled = True
-                    log.info("%s: TP order %d cancelled.", mp.symbol, mp.tp_order_id)
+            if mp.tp_order_id is not None:
+                log.info("%s: Cancelling TP order %d…", mp.symbol, mp.tp_order_id)
+                tp_trade = self._find_trade(mp.tp_order_id)
+                if tp_trade:
+                    self.ib.cancelOrder(tp_trade.order)
+                    if await self._wait_cancel(mp.tp_order_id):
+                        mp.tp_cancelled = True
+                        log.info("%s: TP order %d cancelled.", mp.symbol, mp.tp_order_id)
+                    else:
+                        log.error(
+                            "%s: Timeout waiting for TP cancel (id=%d). Will retry.",
+                            mp.symbol, mp.tp_order_id,
+                        )
+                        mp.state = State.MONITORING
+                        return
                 else:
-                    log.error(
-                        "%s: Timeout waiting for TP cancel (id=%d). Will retry.",
-                        mp.symbol, mp.tp_order_id,
-                    )
-                    mp.state = State.MONITORING
-                    return
+                    mp.tp_cancelled = True
+                    log.info("%s: TP order %d already gone.", mp.symbol, mp.tp_order_id)
             else:
                 mp.tp_cancelled = True
-                log.info("%s: TP order %d already gone.", mp.symbol, mp.tp_order_id)
+                log.info("%s: No TP order ID recorded; skipping TP cancel.", mp.symbol)
 
         if not mp.sl_cancelled:
-            log.info("%s: Cancelling SL order %d…", mp.symbol, mp.sl_order_id)
-            sl_trade = self._find_trade(mp.sl_order_id)
-            if sl_trade:
-                self.ib.cancelOrder(sl_trade.order)
-                if await self._wait_cancel(mp.sl_order_id):
-                    mp.sl_cancelled = True
-                    log.info("%s: SL order %d cancelled.", mp.symbol, mp.sl_order_id)
+            if mp.sl_order_id is not None:
+                log.info("%s: Cancelling SL order %d…", mp.symbol, mp.sl_order_id)
+                sl_trade = self._find_trade(mp.sl_order_id)
+                if sl_trade:
+                    self.ib.cancelOrder(sl_trade.order)
+                    if await self._wait_cancel(mp.sl_order_id):
+                        mp.sl_cancelled = True
+                        log.info("%s: SL order %d cancelled.", mp.symbol, mp.sl_order_id)
+                    else:
+                        log.error(
+                            "%s: Timeout waiting for SL cancel (id=%d). Will retry.",
+                            mp.symbol, mp.sl_order_id,
+                        )
+                        mp.state = State.MONITORING
+                        return
                 else:
-                    log.error(
-                        "%s: Timeout waiting for SL cancel (id=%d). Will retry.",
-                        mp.symbol, mp.sl_order_id,
-                    )
-                    mp.state = State.MONITORING
-                    return
+                    mp.sl_cancelled = True
+                    log.info("%s: SL order %d already gone.", mp.symbol, mp.sl_order_id)
             else:
                 mp.sl_cancelled = True
-                log.info("%s: SL order %d already gone.", mp.symbol, mp.sl_order_id)
+                log.info("%s: No SL order ID recorded; skipping SL cancel.", mp.symbol)
 
         if mp.tp_cancelled and mp.sl_cancelled:
+            # Safety sweep: cancel ANY remaining LMT or STP orders for this
+            # contract before placing the trailing stop. This catches untracked
+            # orders from previous sessions that recovery may have missed.
+            await self._cancel_all_protective_orders(mp)
             await self._place_trailing_stop(mp)
+
+    async def _cancel_all_protective_orders(self, mp: ManagedPosition):
+        """
+        Cancel all open LMT and STP orders for this contract.
+        Called immediately before placing the trailing stop to guarantee a
+        clean slate — no stale stop or limit orders are left active.
+        """
+        terminal = {"Cancelled", "Inactive", "Filled"}
+        to_cancel = [
+            t for t in self.ib.openTrades()
+            if t.contract.conId == mp.conid
+            and t.order.orderType in ("LMT", "STP")
+            and t.orderStatus.status not in terminal
+        ]
+        for t in to_cancel:
+            log.info(
+                "%s: Sweeping residual %s order %d before trailing stop.",
+                mp.symbol, t.order.orderType, t.order.orderId,
+            )
+            self.ib.cancelOrder(t.order)
+        # Wait for all cancellations concurrently
+        if to_cancel:
+            await asyncio.gather(
+                *[self._wait_cancel(t.order.orderId) for t in to_cancel]
+            )
 
     async def _place_trailing_stop(self, mp: ManagedPosition):
         contract = self._order_contract(mp)
