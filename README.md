@@ -265,3 +265,6 @@ Example output:
 - Keep IB Gateway configured to **allow connections from localhost only**.
 - Do not expose IB Gateway port to the public internet.
 - Store credentials outside the repository (environment variables or a separate secrets file).
+
+
+# Team NAK | NADIR ALI KHAN | theteamnak.com

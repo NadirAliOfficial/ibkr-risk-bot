@@ -1,16 +1,3 @@
-"""
-Core risk management bot logic.
-
-Workflow per position
-─────────────────────
-NEW        → place TP (LMT) + SL (STP) as OCA group → MONITORING
-MONITORING → watch market price; when trigger_pct reached → CANCELLING
-CANCELLING → cancel TP order, wait confirmation
-           → cancel SL order, wait confirmation
-           → place Trailing Stop (TRAIL) → TRAILING
-TRAILING   → IBKR manages the trailing stop; bot watches for position close → CLOSED
-"""
-
 from __future__ import annotations
 
 import asyncio

@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-"""
-IBKR Risk Management Bot — entry point.
-
-Usage
-─────
-    python bot.py [--config config.yaml]
-
-The bot connects to IB Gateway, monitors the portfolio for manually opened
-positions, and automatically manages TP / SL / Trailing Stop orders.
-"""
-
 from __future__ import annotations
 
 import argparse
