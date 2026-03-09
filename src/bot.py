@@ -43,7 +43,9 @@ class RiskBot:
         """Main loop: scans portfolio and manages each position."""
         # Request delayed market data (type 3) — works on paper accounts without
         # live data subscriptions. Switch to type 1 for live accounts with subscriptions.
-        self.ib.reqMarketDataType(3)
+        # 3 = delayed (15 min), 4 = delayed-frozen (last delayed when market closed).
+        # Type 4 works on paper accounts in TWS without any data subscription.
+        self.ib.reqMarketDataType(4)
 
         log.info("Bot started. Performing initial portfolio recovery scan…")
         await self._recover()
