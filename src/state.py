@@ -6,6 +6,7 @@ from typing import Optional
 
 class State(Enum):
     NEW        = "NEW"        # Position detected; no orders placed yet
+    NEEDS_TP   = "NEEDS_TP"  # SL exists from recovery but TP is missing; will place TP
     MONITORING = "MONITORING" # TP + SL (OCA) are active; watching trigger price
     CANCELLING = "CANCELLING" # Trigger hit; waiting for TP/SL cancel confirmations
     TRAILING   = "TRAILING"   # Trailing stop is active; IBKR manages it

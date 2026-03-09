@@ -89,20 +89,28 @@ class RiskBot:
                 mp.state = State.TRAILING
                 mp.trail_order_id = trail_orders[0].order.orderId
                 log.info("RECOVERY: %s → TRAILING (orderId=%d)", mp, mp.trail_order_id)
-            elif len(oca_orders) >= 2:
+            elif oca_orders:
+                # At least one OCA order found — resume monitoring.
+                # Use the first STP as SL and first LMT as TP (if present).
                 mp.state = State.MONITORING
                 for t in oca_orders:
                     ot = t.order.orderType
-                    if ot == "LMT":
+                    if ot == "LMT" and mp.tp_order_id is None:
                         mp.tp_order_id = t.order.orderId
                         mp.oca_group   = t.order.ocaGroup
-                    elif ot == "STP":
+                    elif ot == "STP" and mp.sl_order_id is None:
                         mp.sl_order_id = t.order.orderId
                         mp.oca_group   = t.order.ocaGroup
                 log.info(
                     "RECOVERY: %s → MONITORING (TP=%s SL=%s)",
                     mp, mp.tp_order_id, mp.sl_order_id,
                 )
+                if mp.tp_order_id is None:
+                    log.warning(
+                        "RECOVERY: %s has no TP order — will place fresh TP on next tick.",
+                        mp.symbol,
+                    )
+                    mp.state = State.NEEDS_TP
             else:
                 log.info("RECOVERY: %s → NEW (will place TP/SL)", mp)
 
@@ -153,6 +161,9 @@ class RiskBot:
     async def _tick(self, mp: ManagedPosition):
         if mp.state == State.NEW:
             await self._place_tp_sl(mp)
+
+        elif mp.state == State.NEEDS_TP:
+            await self._place_missing_tp(mp)
 
         elif mp.state == State.MONITORING:
             last = self._get_last_price(mp)
@@ -219,6 +230,41 @@ class RiskBot:
             "%s: TP placed @ %.2f (id=%d)  SL placed @ %.2f (id=%d)  OCA=%s",
             mp.symbol, tp_price, mp.tp_order_id,
             sl_price,  mp.sl_order_id, oca_group,
+        )
+
+    async def _place_missing_tp(self, mp: ManagedPosition):
+        """
+        Place only the TP order for a position recovered with a SL but no TP.
+        The new TP is a standalone GTC limit — it won't be OCA-linked to the
+        existing SL, but it will be detected and cancelled by
+        _cancel_all_protective_orders when the trigger fires.
+        """
+        if mp.entry_price <= 0:
+            log.warning(
+                "%s: entry_price not available yet. Retrying next tick.", mp.symbol
+            )
+            return
+
+        contract = self._order_contract(mp)
+        tp_price = mp.tp_price(self.tp_pct)
+
+        tp_order = Order(
+            action        = mp.close_action,
+            orderType     = "LMT",
+            totalQuantity = mp.abs_qty,
+            lmtPrice      = tp_price,
+            tif           = "GTC",
+            transmit      = True,
+        )
+        tp_trade = self.ib.placeOrder(contract, tp_order)
+        await asyncio.sleep(1)
+
+        mp.tp_order_id = tp_trade.order.orderId
+        mp.state       = State.MONITORING
+
+        log.info(
+            "%s: Missing TP placed @ %.2f (id=%d)",
+            mp.symbol, tp_price, mp.tp_order_id,
         )
 
     # ── Cancellation + trailing stop ─────────────────────────────────────────
