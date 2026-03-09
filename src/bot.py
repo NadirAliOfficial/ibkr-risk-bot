@@ -36,6 +36,7 @@ class RiskBot:
         # Register IBKR callbacks
         self.ib.orderStatusEvent += self._on_order_status
         self.ib.positionEvent    += self._on_position_event
+        self.ib.errorEvent       += self._on_error
 
     # ── Public entry point ───────────────────────────────────────────────────
 
@@ -449,3 +450,24 @@ class RiskBot:
                 mp = self._positions.pop(conid)
                 self._cancel_market_data(conid)
                 log.info("Position closed via event: %s", position.contract.symbol)
+
+    def _on_error(self, reqId: int, errorCode: int, errorString: str, contract):
+        # 10089 — no market data subscription; bot uses delayed/frozen data gracefully.
+        # 1100  — connectivity lost; bot reconnects automatically.
+        # 1102  — connectivity restored.
+        # 2104/2106/2158 — market data farm connection notices (informational).
+        ignored = {2104, 2106, 2158}
+        warnings = {10089, 1100, 1101, 1102}
+        if errorCode in ignored:
+            return
+        if errorCode in warnings:
+            if errorCode == 10089:
+                symbol = contract.symbol if contract else "?"
+                log.warning(
+                    "No market data subscription for %s — trigger monitoring paused "
+                    "until data is available (error 10089).", symbol,
+                )
+            else:
+                log.warning("IBKR notice %d: %s", errorCode, errorString)
+        else:
+            log.error("IBKR error %d (reqId=%d): %s", errorCode, reqId, errorString)
