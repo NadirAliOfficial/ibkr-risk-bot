@@ -134,7 +134,7 @@ async def run_entry(ib: IB, params: dict):
     log.info("Buffer     : %.1f%%", buffer_pct)
 
     # ── Cash calculation ──────────────────────────────────────────────────────
-    ib.reqAccountUpdates(True, "")
+    ib.reqAccountUpdates(True)
     await asyncio.sleep(2)  # let account data populate
 
     available_cash = get_cash_balance(ib)
@@ -220,7 +220,7 @@ async def run_entry(ib: IB, params: dict):
         except Exception as exc:
             log.error("%s order failed   : %s", symbol, exc)
 
-    ib.reqAccountUpdates(False, "")
+    ib.reqAccountUpdates(False)
     log.info("=== Entry Bot execution complete ===")
 
 
