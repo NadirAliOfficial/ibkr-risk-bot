@@ -66,10 +66,13 @@ def make_contract(symbol: str) -> Contract:
 
 def get_cash_balance(ib: IB) -> float:
     """Return available USD cash from account summary."""
+    # Try AvailableFunds first, fall back to TotalCashValue if not present
+    # (paper accounts sometimes only return TotalCashValue outside market hours)
+    result = {}
     for av in ib.accountValues():
-        if av.tag == "AvailableFunds" and av.currency == "USD":
-            return float(av.value)
-    return 0.0
+        if av.currency == "USD" and av.tag in ("AvailableFunds", "TotalCashValue"):
+            result[av.tag] = float(av.value)
+    return result.get("AvailableFunds", result.get("TotalCashValue", 0.0))
 
 
 def get_last_price(ib: IB, contract: Contract) -> float | None:
@@ -135,7 +138,7 @@ async def run_entry(ib: IB, params: dict):
 
     # ── Cash calculation ──────────────────────────────────────────────────────
     ib.reqAccountUpdates(True)
-    await asyncio.sleep(2)  # let account data populate
+    await asyncio.sleep(4)  # let account data populate
 
     available_cash = get_cash_balance(ib)
     buffer_amt     = available_cash * (buffer_pct / 100)
