@@ -3,11 +3,12 @@
 
 ibkr:
   host: "127.0.0.1"       # IB Gateway host (use 127.0.0.1 when bot runs on same machine)
-  port: 4002               # 4001 = live, 4002 = paper trading
-  client_id: 1             # Unique client ID; change if you run multiple bots
+  port: 7497               # 4001 = live, 4002 = paper trading
+  client_id: 1             # Risk bot client ID
+  entry_client_id: 2       # Entry bot client ID (must be different from client_id)
 
 risk:
-  tp_pct: 7.0              # Take Profit percent above entry
+  tp_pct: 0.1             # Take Profit percent above entry
   sl_pct: 15.0             # Stop Loss percent below entry
   trigger_pct: 5.0         # Price gain % at which TP/SL are replaced with trailing stop
   trail_pct: 2.0           # Trailing Stop percent

@@ -1,0 +1,8 @@
+{
+  "execution_date": "2026-03-11",
+  "execution_time": "09:31:00",
+  "timezone": "America/New_York",
+  "cash_buffer_percent": 10,
+  "max_usd_per_position": 4000,
+  "symbols": ["PANW", "GOOGL"]
+}
