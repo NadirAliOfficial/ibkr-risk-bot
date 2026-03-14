@@ -456,8 +456,8 @@ class RiskBot:
         # 1100  — connectivity lost; bot reconnects automatically.
         # 1102  — connectivity restored.
         # 2104/2106/2158 — market data farm connection notices (informational).
-        ignored = {2104, 2106, 2158}
-        warnings = {10089, 1100, 1101, 1102}
+        ignored = {2104, 2106, 2158, 2119}
+        warnings = {10089, 1100, 1101, 1102, 321, 2151, 2137}
         if errorCode in ignored:
             return
         if errorCode in warnings:
