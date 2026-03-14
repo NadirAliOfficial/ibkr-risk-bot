@@ -1,11 +1,4 @@
 from __future__ import annotations
-
-"""
-IBKR Entry Bot — Release 2
-Reads a JSON parameter file and places BUY market orders at the scheduled time.
-The Risk Management Bot (bot.py) handles TP / SL / trailing stop automatically.
-"""
-
 import argparse
 import asyncio
 import json
@@ -121,8 +114,10 @@ async def run_entry(ib: IB, params: dict):
     max_usd     = float(params.get("max_usd_per_position", 4000))
 
     # ── Wait until scheduled execution time ──────────────────────────────────
-    target_dt = datetime.fromisoformat(f"{exec_date}T{exec_time}").replace(tzinfo=tz)
-    now       = datetime.now(tz=tz)
+    target_dt  = datetime.fromisoformat(f"{exec_date}T{exec_time}").replace(tzinfo=tz)
+    cutoff_str = params.get("execution_cutoff_time", "10:35:00")
+    cutoff_dt  = datetime.fromisoformat(f"{exec_date}T{cutoff_str}").replace(tzinfo=tz)
+    now        = datetime.now(tz=tz)
 
     if now >= target_dt:
         log.warning("Scheduled time %s is in the past — executing immediately.", target_dt)
@@ -131,14 +126,25 @@ async def run_entry(ib: IB, params: dict):
         log.info("Waiting %.0f seconds until %s (%s)…", wait_secs, exec_time, params["timezone"])
         await asyncio.sleep(wait_secs)
 
+    # ── Late-execution safety check ───────────────────────────────────────────
+    now = datetime.now(tz=tz)
+    if now > cutoff_dt:
+        log.error(
+            "Current time %s is past the cutoff %s — aborting to avoid unintended entries.",
+            now.strftime("%H:%M:%S"), cutoff_str,
+        )
+        return
+
     log.info("=== Entry Bot execution started ===")
     log.info("Symbols    : %s", symbols)
     log.info("Max/pos    : $%.2f", max_usd)
     log.info("Buffer     : %.1f%%", buffer_pct)
 
     # ── Cash calculation ──────────────────────────────────────────────────────
-    ib.reqAccountUpdates(True)
-    await asyncio.sleep(4)  # let account data populate
+    # ib_insync automatically subscribes to account updates on connect.
+    # Calling reqAccountUpdates() manually can block the async event loop.
+    # Just wait briefly for the cache to populate, then read accountValues().
+    await asyncio.sleep(3)
 
     available_cash = get_cash_balance(ib)
     buffer_amt     = available_cash * (buffer_pct / 100)
@@ -223,7 +229,6 @@ async def run_entry(ib: IB, params: dict):
         except Exception as exc:
             log.error("%s order failed   : %s", symbol, exc)
 
-    ib.reqAccountUpdates(False)
     log.info("=== Entry Bot execution complete ===")
 
 
