@@ -5,7 +5,7 @@ import json
 import logging
 import math
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -21,9 +21,10 @@ def setup_logging(cfg: dict):
 
     log_file = cfg.get("file")
     if log_file:
-        # Write entry bot logs to a separate file
-        entry_log = log_file.replace("bot.log", "entry_bot.log") if "bot.log" in log_file else f"entry_{log_file}"
-        handlers.append(logging.FileHandler(entry_log, encoding="utf-8"))
+        # Daily log file: YYYY_MM_DD_entry_bot.log
+        date_prefix = datetime.now().strftime("%Y_%m_%d")
+        daily_log = Path(log_file).parent / f"{date_prefix}_entry_bot.log"
+        handlers.append(logging.FileHandler(daily_log, encoding="utf-8"))
 
     logging.basicConfig(
         level=level,

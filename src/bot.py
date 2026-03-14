@@ -122,7 +122,7 @@ class RiskBot:
     # ── Portfolio scan ───────────────────────────────────────────────────────
 
     async def _scan_positions(self):
-        """Detect new positions; clean up closed ones."""
+        """Detect new positions, clean up closed ones, sweep orphan orders."""
         for pos in self.ib.positions():
             if pos.position == 0:
                 continue
@@ -138,6 +138,29 @@ class RiskBot:
                 mp = self._positions.pop(conid)
                 self._cancel_market_data(conid)
                 log.info("Position closed and removed from tracking: %s", mp.symbol)
+
+        # Orphan order sweep: cancel any open orders for symbols with no position.
+        await self._cancel_orphan_orders(current_conids)
+
+    async def _cancel_orphan_orders(self, active_conids: set):
+        """
+        Cancel any open LMT, STP, or TRAIL orders whose contract no longer
+        has an active position. Prevents accidental short positions from
+        leftover stop orders after a position is closed.
+        """
+        terminal = {"Cancelled", "Inactive", "Filled"}
+        orphans = [
+            t for t in self.ib.openTrades()
+            if t.contract.conId not in active_conids
+            and t.order.orderType in ("LMT", "STP", "TRAIL")
+            and t.orderStatus.status not in terminal
+        ]
+        for t in orphans:
+            log.warning(
+                "Orphan order detected — cancelling %s %s order %d for %s (no active position).",
+                t.order.orderType, t.order.action, t.order.orderId, t.contract.symbol,
+            )
+            self.ib.cancelOrder(t.order)
 
     def _make_managed(self, pos: Position) -> ManagedPosition:
         c = pos.contract

@@ -5,6 +5,7 @@ import asyncio
 import logging
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -21,7 +22,10 @@ def setup_logging(cfg: dict):
 
     log_file = cfg.get("file")
     if log_file:
-        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+        # Daily log file: YYYY_MM_DD_risk_bot.log
+        date_prefix = datetime.now().strftime("%Y_%m_%d")
+        daily_log = Path(log_file).parent / f"{date_prefix}_risk_bot.log"
+        handlers.append(logging.FileHandler(daily_log, encoding="utf-8"))
 
     logging.basicConfig(
         level=level,
@@ -30,9 +34,7 @@ def setup_logging(cfg: dict):
         handlers=handlers,
     )
 
-    # Suppress ib_insync internal noise (position dumps, order verbose logs,
-    # market data subscription notices, farm connection messages, etc.)
-    # Real errors from ib_insync (WARNING and above) still come through.
+    # Suppress ib_insync internal noise
     logging.getLogger("ib_insync").setLevel(logging.WARNING)
 
 
