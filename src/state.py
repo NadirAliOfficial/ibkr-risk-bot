@@ -38,6 +38,9 @@ class ManagedPosition:
     tp_cancelled: bool = False
     sl_cancelled: bool = False
 
+    # Trailing level tracking (-1 = not trailing, 0+ = active level index)
+    current_trail_level: int = -1
+
     # State machine
     state: State = State.NEW
 

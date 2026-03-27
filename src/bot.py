@@ -18,20 +18,31 @@ class RiskBot:
         self.cfg = cfg
 
         r = cfg["risk"]
-        self.tp_pct: float      = r["tp_pct"]
-        self.sl_pct: float      = r["sl_pct"]
-        self.trigger_pct: float = r["trigger_pct"]
-        self.trail_pct: float   = r["trail_pct"]
+        self.tp_pct: float = r["tp_pct"]
+        self.sl_pct: float = r["sl_pct"]
+
+        # Multi-level trailing stop: if trailing_levels is defined, use it;
+        # otherwise fall back to single trigger_pct/trail_pct for backward compat.
+        if "trailing_levels" in r and r["trailing_levels"]:
+            self.trailing_levels = sorted(r["trailing_levels"], key=lambda x: x["trigger"])
+        else:
+            self.trailing_levels = [
+                {"trigger": r["trigger_pct"], "trailing": r["trail_pct"]}
+            ]
 
         b = cfg["bot"]
         self.poll_interval: int = b["poll_interval"]
         self.order_timeout: int = b["order_timeout"]
+        self.protection_check_interval: int = b.get("protection_check_interval", 30)
 
         # conid → ManagedPosition
         self._positions: Dict[int, ManagedPosition] = {}
 
         # conid → Ticker (market data subscriptions, one per position)
         self._tickers: Dict[int, Ticker] = {}
+
+        # Protection loop timestamp
+        self._last_protection_check: float = 0.0
 
         # Register IBKR callbacks
         self.ib.orderStatusEvent += self._on_order_status
@@ -48,6 +59,12 @@ class RiskBot:
         # Type 4 works on paper accounts in TWS without any data subscription.
         self.ib.reqMarketDataType(4)
 
+        levels_desc = ", ".join(
+            f"L{i+1}: +{lv['trigger']}%→{lv['trailing']}% trail"
+            for i, lv in enumerate(self.trailing_levels)
+        )
+        log.info("Trailing levels: %s", levels_desc)
+        log.info("Protection check interval: %ds", self.protection_check_interval)
         log.info("Bot started. Performing initial portfolio recovery scan…")
         await self._recover()
 
@@ -55,6 +72,7 @@ class RiskBot:
             try:
                 await self._scan_positions()
                 await self._tick_all()
+                await self._maybe_check_protection()
             except Exception as exc:
                 log.error("Unexpected error in main loop: %s", exc, exc_info=True)
             await asyncio.sleep(self.poll_interval)
@@ -91,7 +109,19 @@ class RiskBot:
             if trail_orders:
                 mp.state = State.TRAILING
                 mp.trail_order_id = trail_orders[0].order.orderId
-                log.info("RECOVERY: %s → TRAILING (orderId=%d)", mp, mp.trail_order_id)
+                # Determine current trailing level from the order's trailingPercent
+                recovered_pct = trail_orders[0].order.trailingPercent
+                mp.current_trail_level = 0
+                if recovered_pct is not None:
+                    for i, lv in enumerate(self.trailing_levels):
+                        if abs(lv["trailing"] - recovered_pct) < 0.01:
+                            mp.current_trail_level = i
+                            break
+                log.info(
+                    "RECOVERY: %s → TRAILING L%d (orderId=%d, trail=%.1f%%)",
+                    mp, mp.current_trail_level + 1, mp.trail_order_id,
+                    recovered_pct or 0,
+                )
             elif oca_orders:
                 # At least one OCA order found — resume monitoring.
                 # Use the first STP as SL and first LMT as TP (if present).
@@ -195,15 +225,27 @@ class RiskBot:
             last = self._get_last_price(mp)
             if last is None:
                 return
-            if mp.trigger_hit(last, self.trigger_pct):
+            first_trigger = self.trailing_levels[0]["trigger"]
+            if mp.trigger_hit(last, first_trigger):
                 log.info(
-                    "%s trigger reached (last=%.2f trigger=%.2f). Switching to trailing.",
-                    mp.symbol, last, mp.trigger_price(self.trigger_pct),
+                    "%s trigger L1 reached (last=%.2f trigger=%.2f). Switching to trailing.",
+                    mp.symbol, last, mp.trigger_price(first_trigger),
                 )
                 mp.state = State.CANCELLING
                 await self._cancel_oca_and_trail(mp)
 
-        elif mp.state in (State.TRAILING, State.CLOSED):
+        elif mp.state == State.TRAILING:
+            next_level = mp.current_trail_level + 1
+            if next_level >= len(self.trailing_levels):
+                return  # already at max level
+            last = self._get_last_price(mp)
+            if last is None:
+                return
+            next_trigger = self.trailing_levels[next_level]["trigger"]
+            if mp.trigger_hit(last, next_trigger):
+                await self._upgrade_trailing_stop(mp, next_level)
+
+        elif mp.state == State.CLOSED:
             pass
 
     # ── Order placement ──────────────────────────────────────────────────────
@@ -349,7 +391,8 @@ class RiskBot:
             # contract before placing the trailing stop. This catches untracked
             # orders from previous sessions that recovery may have missed.
             await self._cancel_all_protective_orders(mp)
-            await self._place_trailing_stop(mp)
+            first_trail_pct = self.trailing_levels[0]["trailing"]
+            await self._place_trailing_stop(mp, first_trail_pct, level=0)
 
     async def _cancel_all_protective_orders(self, mp: ManagedPosition):
         """
@@ -376,26 +419,110 @@ class RiskBot:
                 *[self._wait_cancel(t.order.orderId) for t in to_cancel]
             )
 
-    async def _place_trailing_stop(self, mp: ManagedPosition):
+    async def _place_trailing_stop(self, mp: ManagedPosition, trail_pct: float, level: int = 0):
         contract = self._order_contract(mp)
         trail_order = Order(
             action          = mp.close_action,
             orderType       = "TRAIL",
             totalQuantity   = mp.abs_qty,
-            trailingPercent = self.trail_pct,
+            trailingPercent = trail_pct,
             tif             = "GTC",
             transmit        = True,
         )
         trail_trade = self.ib.placeOrder(contract, trail_order)
         await asyncio.sleep(1)
 
-        mp.trail_order_id = trail_trade.order.orderId
-        mp.state          = State.TRAILING
+        mp.trail_order_id    = trail_trade.order.orderId
+        mp.current_trail_level = level
+        mp.state             = State.TRAILING
 
         log.info(
-            "%s: Trailing Stop placed (%.1f%%) id=%d",
-            mp.symbol, self.trail_pct, mp.trail_order_id,
+            "%s: Trailing Stop L%d placed (%.1f%%) id=%d",
+            mp.symbol, level + 1, trail_pct, mp.trail_order_id,
         )
+
+    async def _upgrade_trailing_stop(self, mp: ManagedPosition, level: int):
+        level_cfg = self.trailing_levels[level]
+        log.info(
+            "%s: Upgrading trailing stop to L%d (trigger=+%.1f%%, trail=%.1f%%)",
+            mp.symbol, level + 1, level_cfg["trigger"], level_cfg["trailing"],
+        )
+
+        # Cancel existing trailing stop
+        if mp.trail_order_id is not None:
+            trade = self._find_trade(mp.trail_order_id)
+            if trade:
+                self.ib.cancelOrder(trade.order)
+                if not await self._wait_cancel(mp.trail_order_id):
+                    log.error(
+                        "%s: Timeout cancelling trail order %d for upgrade. Will retry.",
+                        mp.symbol, mp.trail_order_id,
+                    )
+                    return
+                log.info("%s: Old trailing stop %d cancelled.", mp.symbol, mp.trail_order_id)
+
+        await self._place_trailing_stop(mp, level_cfg["trailing"], level=level)
+
+    # ── Protection loop ─────────────────────────────────────────────────────
+
+    async def _maybe_check_protection(self):
+        now = time.monotonic()
+        if now - self._last_protection_check < self.protection_check_interval:
+            return
+        self._last_protection_check = now
+        await self._check_protection()
+
+    async def _check_protection(self):
+        """Verify all managed positions still have their protective orders active."""
+        for mp in list(self._positions.values()):
+            if mp.state == State.MONITORING:
+                tp_ok = self._is_order_active(mp.tp_order_id)
+                sl_ok = self._is_order_active(mp.sl_order_id)
+                if not tp_ok or not sl_ok:
+                    log.warning(
+                        "PROTECTION: %s missing orders (TP=%s SL=%s). Recreating protection.",
+                        mp.symbol,
+                        "ok" if tp_ok else "MISSING",
+                        "ok" if sl_ok else "MISSING",
+                    )
+                    # Cancel any remaining orders for a clean slate
+                    await self._cancel_all_protective_orders(mp)
+                    mp.tp_order_id = None
+                    mp.sl_order_id = None
+                    mp.tp_cancelled = False
+                    mp.sl_cancelled = False
+                    mp.oca_group = ""
+                    mp.state = State.NEW
+
+            elif mp.state == State.TRAILING:
+                if not self._is_order_active(mp.trail_order_id):
+                    log.warning(
+                        "PROTECTION: %s trailing stop missing. Recreating at L%d.",
+                        mp.symbol, mp.current_trail_level + 1,
+                    )
+                    level_idx = max(mp.current_trail_level, 0)
+                    trail_pct = self.trailing_levels[level_idx]["trailing"]
+                    await self._place_trailing_stop(mp, trail_pct, level=level_idx)
+
+            elif mp.state == State.NEEDS_TP:
+                if mp.sl_order_id and not self._is_order_active(mp.sl_order_id):
+                    log.warning(
+                        "PROTECTION: %s SL order also missing. Resetting to NEW.",
+                        mp.symbol,
+                    )
+                    mp.tp_order_id = None
+                    mp.sl_order_id = None
+                    mp.oca_group = ""
+                    mp.state = State.NEW
+
+    def _is_order_active(self, order_id: Optional[int]) -> bool:
+        if order_id is None:
+            return False
+        terminal = {"Cancelled", "Inactive", "Filled"}
+        trade = self._find_trade(order_id)
+        if trade is None:
+            return False
+        return trade.orderStatus.status not in terminal
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 

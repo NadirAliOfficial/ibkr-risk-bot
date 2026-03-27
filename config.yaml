@@ -3,20 +3,37 @@
 
 ibkr:
   host: "127.0.0.1"       # IB Gateway host (use 127.0.0.1 when bot runs on same machine)
-  port: 7497               # 4001 = live, 4002 = paper trading
+  port: 4002               # 4001 = live, 4002 = paper trading
   client_id: 1             # Risk bot client ID
   entry_client_id: 2       # Entry bot client ID (must be different from client_id)
 
 risk:
   tp_pct: 0.1             # Take Profit percent above entry
   sl_pct: 15.0             # Stop Loss percent below entry
-  trigger_pct: 5.0         # Price gain % at which TP/SL are replaced with trailing stop
-  trail_pct: 2.0           # Trailing Stop percent
+
+  # Multi-level trailing stop (up to 4 levels).
+  # When price reaches a trigger %, TP/SL are replaced with a trailing stop.
+  # When a higher level is reached, the trailing stop is upgraded automatically.
+  # If trailing_levels is omitted, set trigger_pct and trail_pct for single-level mode.
+  trailing_levels:
+    - trigger: 2.5         # Level 1: +2.5% gain → 1.5% trailing stop
+      trailing: 1.5
+    - trigger: 5.0         # Level 2: +5.0% gain → 2.0% trailing stop
+      trailing: 2.0
+    - trigger: 7.0         # Level 3: +7.0% gain → 2.5% trailing stop
+      trailing: 2.5
+    - trigger: 10.0        # Level 4: +10.0% gain → 3.0% trailing stop
+      trailing: 3.0
+
+  # Single-level fallback (used only if trailing_levels is not set):
+  # trigger_pct: 5.0
+  # trail_pct: 2.0
 
 bot:
   poll_interval: 5         # Seconds between portfolio scans
   reconnect_delay: 30      # Seconds to wait before reconnecting after disconnect
   order_timeout: 30        # Seconds to wait for order cancel confirmation
+  protection_check_interval: 30  # Seconds between protection verification checks
 
 logging:
   level: "INFO"            # DEBUG | INFO | WARNING | ERROR
