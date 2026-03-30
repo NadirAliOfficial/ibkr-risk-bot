@@ -219,6 +219,31 @@ class TestTickTrailingUpgrade:
         assert mp.trail_order_id != 50
 
     @pytest.mark.asyncio
+    async def test_price_gap_skips_to_highest_level(self):
+        """Price jumps past L2 and L3 — should upgrade directly to L4."""
+        levels = [
+            {"trigger": 2.5, "trailing": 1.5},
+            {"trigger": 5.0, "trailing": 2.0},
+            {"trigger": 7.0, "trailing": 2.5},
+            {"trigger": 10.0, "trailing": 3.0},
+        ]
+        bot = _make_bot(_make_config(trailing_levels=levels))
+        mp = _long_mp(state=State.TRAILING, current_trail_level=0, trail_order_id=50)
+        old_trade = FakeTrade(
+            order=FakeOrder(orderId=50, orderType="TRAIL"),
+            orderStatus=FakeOrderStatus(status="Submitted"),
+        )
+        bot.ib.openTrades.return_value = [old_trade]
+        # Price at 111 → +11% → above all triggers (L1=2.5, L2=5, L3=7, L4=10)
+        bot._tickers[1] = FakeTicker(last=111.0)
+
+        with patch.object(bot, '_wait_cancel', return_value=True):
+            await bot._tick(mp)
+
+        assert mp.current_trail_level == 3  # jumped straight to L4
+        assert mp.trail_order_id != 50
+
+    @pytest.mark.asyncio
     async def test_no_upgrade_at_max_level(self):
         levels = [{"trigger": 2.5, "trailing": 1.5}]
         bot = _make_bot(_make_config(trailing_levels=levels))
@@ -270,6 +295,26 @@ class TestProtectionLoop:
         with patch.object(bot, '_check_protection') as mock_check:
             await bot._maybe_check_protection()
             mock_check.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_monitoring_with_cancel_in_progress(self):
+        """Protection loop should not interfere when cancel/trail transition is underway."""
+        bot = _make_bot()
+        mp = _long_mp(
+            state=State.MONITORING,
+            tp_order_id=10,
+            sl_order_id=11,
+            oca_group="OCA_AAPL_123",
+        )
+        mp.tp_cancelled = True  # cancel in progress
+        bot._positions[1] = mp
+        bot.ib.openTrades.return_value = []  # orders are gone
+
+        await bot._check_protection()
+
+        # Should NOT reset to NEW — cancel transition is in progress
+        assert mp.state == State.MONITORING
+        assert mp.tp_cancelled is True
 
     @pytest.mark.asyncio
     async def test_monitoring_missing_tp_resets_to_new(self):

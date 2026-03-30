@@ -241,9 +241,16 @@ class RiskBot:
             last = self._get_last_price(mp)
             if last is None:
                 return
-            next_trigger = self.trailing_levels[next_level]["trigger"]
-            if mp.trigger_hit(last, next_trigger):
-                await self._upgrade_trailing_stop(mp, next_level)
+            if not mp.trigger_hit(last, self.trailing_levels[next_level]["trigger"]):
+                return
+            # Find the highest level whose trigger is met (handles price gaps)
+            target_level = next_level
+            for i in range(next_level + 1, len(self.trailing_levels)):
+                if mp.trigger_hit(last, self.trailing_levels[i]["trigger"]):
+                    target_level = i
+                else:
+                    break
+            await self._upgrade_trailing_stop(mp, target_level)
 
         elif mp.state == State.CLOSED:
             pass
@@ -476,6 +483,9 @@ class RiskBot:
         """Verify all managed positions still have their protective orders active."""
         for mp in list(self._positions.values()):
             if mp.state == State.MONITORING:
+                # Skip if a cancel/trail transition is in progress
+                if mp.tp_cancelled or mp.sl_cancelled:
+                    continue
                 tp_ok = self._is_order_active(mp.tp_order_id)
                 sl_ok = self._is_order_active(mp.sl_order_id)
                 if not tp_ok or not sl_ok:
@@ -569,9 +579,9 @@ class RiskBot:
             self.ib.cancelMktData(ticker.contract)
 
     async def _wait_cancel(self, order_id: int) -> bool:
-        """Poll until the order is confirmed cancelled or timeout."""
+        """Poll until the order is confirmed cancelled (or filled) or timeout."""
         deadline = time.monotonic() + self.order_timeout
-        terminal = {"Cancelled", "Inactive"}
+        terminal = {"Cancelled", "Inactive", "Filled"}
         while time.monotonic() < deadline:
             trade = self._find_trade(order_id)
             if trade is None:
