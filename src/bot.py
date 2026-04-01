@@ -481,6 +481,7 @@ class RiskBot:
 
     async def _check_protection(self):
         """Verify all managed positions still have their protective orders active."""
+        log.debug("Protection check running — %d position(s) tracked.", len(self._positions))
         for mp in list(self._positions.values()):
             if mp.state == State.MONITORING:
                 # Skip if a cancel/trail transition is in progress

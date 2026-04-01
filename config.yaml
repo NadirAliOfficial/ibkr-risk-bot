@@ -6,6 +6,7 @@ ibkr:
   port: 4002               # 4001 = live, 4002 = paper trading
   client_id: 1             # Risk bot client ID
   entry_client_id: 2       # Entry bot client ID (must be different from client_id)
+  snapshot_client_id: 4    # Snapshot bot client ID (read-only, must be unique)
 
 risk:
   tp_pct: 0.1             # Take Profit percent above entry
