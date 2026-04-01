@@ -45,7 +45,7 @@ def load_config(path: str) -> dict:
 
 log = logging.getLogger(__name__)
 
-IGNORED_ERRORS = {2104, 2106, 2158, 2119}
+IGNORED_ERRORS = {2104, 2106, 2107, 2158, 2119, 300}
 WARNING_ERRORS = {10089, 1100, 1101, 1102, 321, 2151, 2137}
 
 
@@ -60,18 +60,22 @@ def on_error(reqId, errorCode, errorString, contract):
 
 def get_last_price(ib: IB, contract: Contract) -> Optional[float]:
     ticker = ib.reqMktData(contract, "", snapshot=True, regulatorySnapshot=False)
+    result = None
     for _ in range(10):
         ib.sleep(0.5)
         price = ticker.last
         if price and price == price and price > 0:
-            ib.cancelMktData(contract)
-            return price
+            result = price
+            break
         price = ticker.close
         if price and price == price and price > 0:
-            ib.cancelMktData(contract)
-            return price
-    ib.cancelMktData(contract)
-    return None
+            result = price
+            break
+    try:
+        ib.cancelMktData(contract)
+    except Exception:
+        pass
+    return result
 
 
 def get_company_name(ib: IB, contract: Contract) -> str:
