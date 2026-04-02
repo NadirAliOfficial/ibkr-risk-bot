@@ -33,12 +33,9 @@ def setup_logging(cfg: dict):
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=handlers,
     )
-    ib_logger = logging.getLogger("ib_insync")
-    ib_logger.setLevel(logging.WARNING)
-    # Suppress error 300 (tickerId not found) and HMDS 2107 logged by ib_insync
-    # internally before our error handler runs.
-    ib_logger.addFilter(lambda record: "Error 300" not in record.getMessage()
-                        and "2107" not in record.getMessage())
+    # Suppress all ib_insync internal logging — we handle errors via errorEvent
+    for name in ("ib_insync", "ib_insync.wrapper", "ib_insync.client", "ib_insync.ib"):
+        logging.getLogger(name).setLevel(logging.CRITICAL)
 
 
 def load_config(path: str) -> dict:
@@ -50,8 +47,8 @@ def load_config(path: str) -> dict:
 
 log = logging.getLogger(__name__)
 
-IGNORED_ERRORS = {2104, 2106, 2107, 2158, 2119, 300}
-WARNING_ERRORS = {10089, 1100, 1101, 1102, 321, 2151, 2137}
+IGNORED_ERRORS = {2104, 2106, 2107, 2158, 2119, 300, 10089, 2103}
+WARNING_ERRORS = {1100, 1101, 1102, 321, 2151, 2137}
 
 
 def on_error(reqId, errorCode, errorString, contract):
