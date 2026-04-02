@@ -321,17 +321,17 @@ def _write_pdf(filepath: Path, rows: list[dict], date_str: str, time_str: str):
     elements.append(Paragraph(f"Portfolio Snapshot — {date_str} {time_str}", title_style))
     elements.append(Spacer(1, 4 * mm))
 
-    # Table data
-    header = COLUMNS
-    table_data = [header]
+    # Table data (exclude Company Name from PDF for cleaner layout)
+    pdf_columns = [c for c in COLUMNS if c != "Company Name"]
+    table_data = [pdf_columns]
 
     for row in rows:
-        table_data.append([_fmt_val(col, row.get(col)) for col in COLUMNS])
+        table_data.append([_fmt_val(col, row.get(col)) for col in pdf_columns])
 
     if not rows:
-        table_data.append(["No open positions"] + [""] * (len(COLUMNS) - 1))
+        table_data.append(["No open positions"] + [""] * (len(pdf_columns) - 1))
 
-    col_count = len(COLUMNS)
+    col_count = len(pdf_columns)
     avail_width = landscape(A4)[0] - 20 * mm
     col_width = avail_width / col_count
 
@@ -354,7 +354,7 @@ def _write_pdf(filepath: Path, rows: list[dict], date_str: str, time_str: str):
     # Color PnL cells
     for row_idx, row in enumerate(rows, 1):
         for col_name in ("PnL USD", "PnL %"):
-            col_idx = COLUMNS.index(col_name)
+            col_idx = pdf_columns.index(col_name)
             val = row.get(col_name)
             if val is not None:
                 color = colors.HexColor("#006100") if val >= 0 else colors.HexColor("#9C0006")
