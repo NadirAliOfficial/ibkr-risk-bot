@@ -33,7 +33,12 @@ def setup_logging(cfg: dict):
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=handlers,
     )
-    logging.getLogger("ib_insync").setLevel(logging.WARNING)
+    ib_logger = logging.getLogger("ib_insync")
+    ib_logger.setLevel(logging.WARNING)
+    # Suppress error 300 (tickerId not found) and HMDS 2107 logged by ib_insync
+    # internally before our error handler runs.
+    ib_logger.addFilter(lambda record: "Error 300" not in record.getMessage()
+                        and "2107" not in record.getMessage())
 
 
 def load_config(path: str) -> dict:
