@@ -13,6 +13,11 @@ from ib_insync import IB, Contract, util
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, numbers
 from openpyxl.utils import get_column_letter
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import landscape, A4
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 
 # ── Logging setup ────────────────────────────────────────────────────────────
@@ -206,12 +211,22 @@ async def run_snapshot(ib: IB, output_dir: str):
             "Behaviour": behaviour,
         })
 
-    # Generate XLSX
-    filename = f"Portfolio_Snapshot_{now.strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
-    filepath = Path(output_dir) / filename
-    _write_xlsx(filepath, rows)
+    # Ensure output directory exists
+    out = Path(output_dir) / "Snapshots"
+    out.mkdir(parents=True, exist_ok=True)
 
-    log.info("Snapshot saved: %s", filepath)
+    base = f"Portfolio_Snapshot_{now.strftime('%Y-%m-%d_%H-%M-%S')}"
+
+    # Generate XLSX
+    xlsx_path = out / f"{base}.xlsx"
+    _write_xlsx(xlsx_path, rows)
+    log.info("XLSX saved: %s", xlsx_path)
+
+    # Generate PDF
+    pdf_path = out / f"{base}.pdf"
+    _write_pdf(pdf_path, rows, date_str, time_str)
+    log.info("PDF  saved: %s", pdf_path)
+
     log.info("=== Portfolio Snapshot complete ===")
 
 
@@ -275,6 +290,82 @@ def _write_xlsx(filepath: Path, rows: list[dict]):
     wb.save(filepath)
 
 
+# ── PDF generation ───────────────────────────────────────────────────────────
+
+def _fmt_val(col: str, val) -> str:
+    if val is None:
+        return "-"
+    if col in ("Entry Price", "Current Price", "Take Profit Price",
+               "Stop Loss Price", "PnL USD"):
+        return f"{val:,.2f}"
+    if col in ("PnL %", "Trailing %"):
+        return f"{val:.2f}%"
+    return str(val)
+
+
+def _write_pdf(filepath: Path, rows: list[dict], date_str: str, time_str: str):
+    doc = SimpleDocTemplate(
+        str(filepath),
+        pagesize=landscape(A4),
+        leftMargin=10 * mm, rightMargin=10 * mm,
+        topMargin=15 * mm, bottomMargin=15 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    elements = []
+
+    # Title
+    title_style = ParagraphStyle(
+        "SnapshotTitle", parent=styles["Title"], fontSize=14, spaceAfter=6,
+    )
+    elements.append(Paragraph(f"Portfolio Snapshot — {date_str} {time_str}", title_style))
+    elements.append(Spacer(1, 4 * mm))
+
+    # Table data
+    header = COLUMNS
+    table_data = [header]
+
+    for row in rows:
+        table_data.append([_fmt_val(col, row.get(col)) for col in COLUMNS])
+
+    if not rows:
+        table_data.append(["No open positions"] + [""] * (len(COLUMNS) - 1))
+
+    col_count = len(COLUMNS)
+    avail_width = landscape(A4)[0] - 20 * mm
+    col_width = avail_width / col_count
+
+    table = Table(table_data, colWidths=[col_width] * col_count)
+
+    style_cmds = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2F5496")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 7),
+        ("FONTSIZE", (0, 1), (-1, -1), 6.5),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F2F2F2")]),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+
+    # Color PnL cells
+    for row_idx, row in enumerate(rows, 1):
+        for col_name in ("PnL USD", "PnL %"):
+            col_idx = COLUMNS.index(col_name)
+            val = row.get(col_name)
+            if val is not None:
+                color = colors.HexColor("#006100") if val >= 0 else colors.HexColor("#9C0006")
+                style_cmds.append(("TEXTCOLOR", (col_idx, row_idx), (col_idx, row_idx), color))
+
+    table.setStyle(TableStyle(style_cmds))
+    elements.append(table)
+
+    doc.build(elements)
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 async def main(cfg: dict, output_dir: str):
@@ -310,7 +401,7 @@ async def main(cfg: dict, output_dir: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="IBKR Portfolio Snapshot Bot")
     parser.add_argument("--config", default="config.yaml", help="Path to YAML config")
-    parser.add_argument("--output", default=".", help="Output directory for XLSX files")
+    parser.add_argument("--output", default=".", help="Base directory (files saved to <output>/Snapshots/)")
     args = parser.parse_args()
 
     if not Path(args.config).exists():
