@@ -1,0 +1,30 @@
+# IBKR Watchdog Bot — Configuration
+
+watchdog:
+  check_interval_seconds: 60      # How often to check services are running
+  startup_delay_ibc_to_risk: 20   # Seconds to wait after starting IBC before Risk Bot
+  startup_delay_risk_to_entry: 20 # Seconds to wait after starting Risk Bot before Entry Bot
+  restart_cooldown_seconds: 30    # Minimum seconds between restarts of same service
+
+services:
+  ibc:
+    name: "IBC"
+    launch_path: "C:\\SB-ITM\\IBC\\start_ibc.bat"
+    process_match: "start_ibc"    # String to detect IBC in running processes
+    enabled: true
+
+  risk_bot:
+    name: "Risk Bot"
+    launch_path: "C:\\SB-ITM\\RiskBot\\run.bat"
+    process_match: "bot.py"       # String to detect Risk Bot in running processes
+    enabled: true
+
+  entry_bot:
+    name: "Entry Bot"
+    launch_path: "C:\\SB-ITM\\EntryBot\\run.bat"
+    process_match: "entry_bot.py" # String to detect Entry Bot in running processes
+    enabled: true
+
+logging:
+  level: "INFO"                   # DEBUG | INFO | WARNING | ERROR
+  file: "watchdog.log"            # Set to null to disable file logging
