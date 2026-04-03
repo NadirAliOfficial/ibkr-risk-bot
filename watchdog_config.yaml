@@ -1,30 +1,34 @@
 # IBKR Watchdog Bot — Configuration
 
 watchdog:
-  check_interval_seconds: 60      # How often to check services are running
-  startup_delay_ibc_to_risk: 20   # Seconds to wait after starting IBC before Risk Bot
-  startup_delay_risk_to_entry: 20 # Seconds to wait after starting Risk Bot before Entry Bot
-  restart_cooldown_seconds: 30    # Minimum seconds between restarts of same service
+  check_interval_seconds: 60           # How often to check services are running
+  startup_delay_ibc_to_risk: 20        # Seconds to wait after starting IBC before Risk Bot
+  startup_delay_risk_to_entry: 20      # Seconds to wait after starting Risk Bot before Entry Bot
+  restart_cooldown_seconds: 30         # Minimum seconds between restarts of same service
+  initial_monitor_delay_seconds: 60    # Seconds to wait after startup before first monitor check
 
 services:
   ibc:
     name: "IBC"
     launch_path: "C:\\SB-ITM\\IBC\\start_ibc.bat"
-    process_match: "start_ibc"    # String to detect IBC in running processes
+    process_match: "start_ibc"         # String to detect IBC in running processes
     enabled: true
+    monitor: true                      # Restart if it stops
 
   risk_bot:
     name: "Risk Bot"
     launch_path: "C:\\SB-ITM\\RiskBot\\run.bat"
-    process_match: "bot.py"       # String to detect Risk Bot in running processes
+    process_match: " bot.py"           # Leading space ensures "entry_bot.py" won't match
     enabled: true
+    monitor: true                      # Restart if it stops
 
   entry_bot:
     name: "Entry Bot"
     launch_path: "C:\\SB-ITM\\EntryBot\\run.bat"
-    process_match: "entry_bot.py" # String to detect Entry Bot in running processes
+    process_match: "entry_bot.py"      # String to detect Entry Bot in running processes
     enabled: true
+    monitor: false                     # Launched at startup only — runs once per day and exits naturally
 
 logging:
-  level: "INFO"                   # DEBUG | INFO | WARNING | ERROR
-  file: "watchdog.log"            # Set to null to disable file logging
+  level: "INFO"                        # DEBUG | INFO | WARNING | ERROR
+  file: "watchdog.log"                 # Set to null to disable file logging

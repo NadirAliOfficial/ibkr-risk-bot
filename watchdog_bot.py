@@ -16,14 +16,16 @@ import yaml
 
 # ── Logging setup ────────────────────────────────────────────────────────────
 
-def setup_logging(cfg: dict):
+def setup_logging(cfg: dict, config_path: str):
     level = getattr(logging, cfg.get("level", "INFO").upper(), logging.INFO)
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
 
     log_file = cfg.get("file")
     if log_file:
+        # Resolve log file relative to config file location, not cwd
+        log_path = Path(config_path).parent / log_file
         date_prefix = datetime.now().strftime("%Y_%m_%d")
-        daily_log = Path(log_file).parent / f"{date_prefix}_watchdog_bot.log"
+        daily_log = log_path.parent / f"{date_prefix}_watchdog_bot.log"
         handlers.append(logging.FileHandler(daily_log, encoding="utf-8"))
 
     logging.basicConfig(
@@ -62,9 +64,13 @@ def is_running(match: str) -> bool:
 def launch(name: str, path: str):
     """Launch a service via its .bat file (non-blocking)."""
     log = logging.getLogger(__name__)
+    bat = Path(path)
+    if not bat.exists():
+        log.error("%s: launch path not found — %s", name, path)
+        return
     try:
         subprocess.Popen(
-            [path],
+            path,
             shell=True,
             creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
         )
@@ -81,10 +87,11 @@ log = logging.getLogger(__name__)
 class Watchdog:
     def __init__(self, cfg: dict):
         w = cfg["watchdog"]
-        self.check_interval: int  = w.get("check_interval_seconds", 60)
-        self.delay_ibc_risk: int  = w.get("startup_delay_ibc_to_risk", 20)
+        self.check_interval: int   = w.get("check_interval_seconds", 60)
+        self.delay_ibc_risk: int   = w.get("startup_delay_ibc_to_risk", 20)
         self.delay_risk_entry: int = w.get("startup_delay_risk_to_entry", 20)
-        self.cooldown: int        = w.get("restart_cooldown_seconds", 30)
+        self.cooldown: int         = w.get("restart_cooldown_seconds", 30)
+        self.monitor_delay: int    = w.get("initial_monitor_delay_seconds", 60)
 
         s = cfg["services"]
         self.ibc   = s["ibc"]
@@ -104,6 +111,10 @@ class Watchdog:
         path  = svc["launch_path"]
 
         if not svc.get("enabled", True):
+            return
+
+        # Services with monitor: false are started at startup but not restarted by the monitor loop
+        if not svc.get("monitor", True):
             return
 
         if not is_running(match):
@@ -147,6 +158,8 @@ class Watchdog:
 
     def monitor(self):
         """Continuous monitoring loop."""
+        log.info("Waiting %ds before first monitor check…", self.monitor_delay)
+        time.sleep(self.monitor_delay)
         log.info("Monitoring started (check every %ds, cooldown %ds).",
                  self.check_interval, self.cooldown)
         while True:
@@ -176,7 +189,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     cfg = load_config(args.config)
-    setup_logging(cfg.get("logging", {}))
+    setup_logging(cfg.get("logging", {}), args.config)
 
     log.info("=== IBKR Watchdog Bot started ===")
 
