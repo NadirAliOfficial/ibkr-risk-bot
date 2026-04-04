@@ -88,22 +88,10 @@ def launch(name: str, path: str, show_window: bool = True):
         return
     try:
         if sys.platform == "win32":
-            if show_window:
-                si = subprocess.STARTUPINFO()
-                si.dwFlags = subprocess.STARTF_USESHOWWINDOW
-                si.wShowWindow = 1  # SW_NORMAL — visible, not minimised
-                subprocess.Popen(
-                    path,
-                    shell=True,
-                    creationflags=subprocess.CREATE_NEW_CONSOLE,
-                    startupinfo=si,
-                )
-            else:
-                subprocess.Popen(
-                    path,
-                    shell=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                )
+            # Invoke cmd.exe directly (no shell=True) so CREATE_NEW_CONSOLE / CREATE_NO_WINDOW
+            # apply to the actual console window, not an intermediate wrapper process.
+            flags = subprocess.CREATE_NEW_CONSOLE if show_window else subprocess.CREATE_NO_WINDOW
+            subprocess.Popen(["cmd.exe", "/c", path], creationflags=flags)
         else:
             subprocess.Popen(path, shell=True)
         log.info("%s: launched successfully.", name)
