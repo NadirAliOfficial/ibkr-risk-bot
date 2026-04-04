@@ -22,7 +22,6 @@ def setup_logging(cfg: dict, config_path: str):
 
     log_file = cfg.get("file")
     if log_file:
-        # Resolve log file relative to config file location, not cwd
         log_path = Path(config_path).parent / log_file
         date_prefix = datetime.now().strftime("%Y_%m_%d")
         daily_log = log_path.parent / f"{date_prefix}_watchdog_bot.log"
@@ -41,7 +40,7 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(fh)
 
 
-# ── Process detection ─────────────────────────────────────────────────────────
+# ── Process / port detection ──────────────────────────────────────────────────
 
 def is_running(match: str) -> bool:
     """Return True if any running process (excluding this watchdog) has match in its command line."""
@@ -51,7 +50,6 @@ def is_running(match: str) -> bool:
             if proc.pid == my_pid:
                 continue
             cmdline = " ".join(proc.info["cmdline"] or [])
-            # Never match the watchdog process itself (handles "bot.py" ⊂ "watchdog_bot.py")
             if "watchdog" in cmdline.lower():
                 continue
             if match.lower() in cmdline.lower():
@@ -61,19 +59,53 @@ def is_running(match: str) -> bool:
     return False
 
 
-def launch(name: str, path: str):
+def is_port_listening(port: int) -> bool:
+    """Return True if any process is listening on the given TCP port."""
+    try:
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.laddr.port == port and conn.status == "LISTEN":
+                return True
+    except (psutil.AccessDenied, PermissionError):
+        pass
+    return False
+
+
+def service_is_up(svc: dict) -> bool:
+    """Check if a service is running — via port if port_check is set, else process name."""
+    port = svc.get("port_check")
+    if port:
+        return is_port_listening(int(port))
+    return is_running(svc["process_match"])
+
+
+# ── Launch ────────────────────────────────────────────────────────────────────
+
+def launch(name: str, path: str, show_window: bool = True):
     """Launch a service via its .bat file (non-blocking)."""
-    log = logging.getLogger(__name__)
     bat = Path(path)
     if not bat.exists():
         log.error("%s: launch path not found — %s", name, path)
         return
     try:
-        subprocess.Popen(
-            path,
-            shell=True,
-            creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
-        )
+        if sys.platform == "win32":
+            if show_window:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags = subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 1  # SW_NORMAL — visible, not minimised
+                subprocess.Popen(
+                    path,
+                    shell=True,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    startupinfo=si,
+                )
+            else:
+                subprocess.Popen(
+                    path,
+                    shell=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+        else:
+            subprocess.Popen(path, shell=True)
         log.info("%s: launched successfully.", name)
     except Exception as exc:
         log.error("%s: failed to launch — %s", name, exc)
@@ -92,35 +124,36 @@ class Watchdog:
         self.delay_risk_entry: int = w.get("startup_delay_risk_to_entry", 20)
         self.cooldown: int         = w.get("restart_cooldown_seconds", 30)
         self.monitor_delay: int    = w.get("initial_monitor_delay_seconds", 60)
+        self.show_windows: bool    = w.get("show_windows", True)
 
         s = cfg["services"]
         self.ibc   = s["ibc"]
         self.risk  = s["risk_bot"]
         self.entry = s["entry_bot"]
 
-        # Track last restart time per service to enforce cooldown
         self._last_restart: dict[str, float] = {}
 
     def _should_restart(self, name: str) -> bool:
         last = self._last_restart.get(name, 0)
         return (time.monotonic() - last) >= self.cooldown
 
+    def _launch(self, svc: dict):
+        show = svc.get("show_window", self.show_windows)
+        launch(svc["name"], svc["launch_path"], show_window=show)
+
     def _check_and_restart(self, svc: dict):
-        name  = svc["name"]
-        match = svc["process_match"]
-        path  = svc["launch_path"]
+        name = svc["name"]
 
         if not svc.get("enabled", True):
             return
 
-        # Services with monitor: false are started at startup but not restarted by the monitor loop
         if not svc.get("monitor", True):
             return
 
-        if not is_running(match):
+        if not service_is_up(svc):
             if self._should_restart(name):
                 log.warning("%s not running — restarting…", name)
-                launch(name, path)
+                self._launch(svc)
                 self._last_restart[name] = time.monotonic()
             else:
                 log.warning("%s not running — cooldown active, skipping restart.", name)
@@ -129,27 +162,27 @@ class Watchdog:
         """Ordered startup sequence: IBC → Risk Bot → Entry Bot."""
         log.info("=== Watchdog startup sequence ===")
 
-        if self.ibc.get("enabled", True) and not is_running(self.ibc["process_match"]):
+        if self.ibc.get("enabled", True) and not service_is_up(self.ibc):
             log.info("Starting %s…", self.ibc["name"])
-            launch(self.ibc["name"], self.ibc["launch_path"])
+            self._launch(self.ibc)
             self._last_restart[self.ibc["name"]] = time.monotonic()
             log.info("Waiting %ds for IBC to initialise…", self.delay_ibc_risk)
             time.sleep(self.delay_ibc_risk)
         else:
             log.info("%s already running.", self.ibc["name"])
 
-        if self.risk.get("enabled", True) and not is_running(self.risk["process_match"]):
+        if self.risk.get("enabled", True) and not service_is_up(self.risk):
             log.info("Starting %s…", self.risk["name"])
-            launch(self.risk["name"], self.risk["launch_path"])
+            self._launch(self.risk)
             self._last_restart[self.risk["name"]] = time.monotonic()
             log.info("Waiting %ds before starting Entry Bot…", self.delay_risk_entry)
             time.sleep(self.delay_risk_entry)
         else:
             log.info("%s already running.", self.risk["name"])
 
-        if self.entry.get("enabled", True) and not is_running(self.entry["process_match"]):
+        if self.entry.get("enabled", True) and not service_is_up(self.entry):
             log.info("Starting %s…", self.entry["name"])
-            launch(self.entry["name"], self.entry["launch_path"])
+            self._launch(self.entry)
             self._last_restart[self.entry["name"]] = time.monotonic()
         else:
             log.info("%s already running.", self.entry["name"])
