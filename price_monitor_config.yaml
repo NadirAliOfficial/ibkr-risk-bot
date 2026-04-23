@@ -1,0 +1,16 @@
+# Price Monitor Configuration
+
+# IB Gateway connection
+host: "127.0.0.1"
+port: 4002
+client_id: 10          # dedicated ID — must not conflict with other bots
+
+# Polling
+poll_interval_seconds: 120   # snapshot every 2 minutes
+
+# Web interface
+web_port: 8050         # open http://localhost:8050 in browser
+
+# Session window displayed on graph (Eastern Time)
+session_start: "15:30"
+session_end: "22:00"
