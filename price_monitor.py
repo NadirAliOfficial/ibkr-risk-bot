@@ -5,6 +5,7 @@ Connects to IB Gateway, fetches open positions, and displays a real-time
 price chart at http://localhost:8050. Read-only — no orders placed.
 """
 
+import math
 import sys
 import threading
 import webbrowser
@@ -49,16 +50,22 @@ def open_position_contracts() -> dict[str, object]:
     positions = ib.positions()
     return {p.contract.symbol: p.contract for p in positions if p.position != 0}
 
+def _valid(val) -> bool:
+    try:
+        return val is not None and not math.isnan(val) and val > 0
+    except TypeError:
+        return False
+
 def fetch_prices(contracts: dict) -> dict[str, float]:
     prices = {}
     for symbol, contract in contracts.items():
-        ticker = ib.reqMktData(contract, "233", False, False)
+        ticker = ib.reqMktData(contract, "", False, False)
         ib.sleep(2.0)
         price = None
-        for val in (ticker.last, ticker.close, ticker.bid, ticker.ask):
-            if val and val > 0:
-                price = val
-                break
+        if _valid(ticker.last):
+            price = ticker.last
+        elif _valid(ticker.bid) and _valid(ticker.ask):
+            price = (ticker.bid + ticker.ask) / 2
         if price:
             prices[symbol] = price
         ib.cancelMktData(contract)
