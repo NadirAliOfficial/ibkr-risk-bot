@@ -12,7 +12,7 @@ from collections import defaultdict
 from datetime import datetime, date
 
 import yaml
-from ib_insync import IB, util
+from ib_insync import IB
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output
@@ -27,11 +27,11 @@ def load_config():
         return yaml.safe_load(f)
 
 cfg = load_config()
-HOST        = cfg.get("host", "127.0.0.1")
-PORT        = cfg.get("port", 4002)
-CLIENT_ID   = cfg.get("client_id", 10)
-POLL_SEC    = cfg.get("poll_interval_seconds", 120)
-WEB_PORT    = cfg.get("web_port", 8050)
+HOST          = cfg.get("host", "127.0.0.1")
+PORT          = cfg.get("port", 4002)
+CLIENT_ID     = cfg.get("client_id", 10)
+POLL_SEC      = cfg.get("poll_interval_seconds", 120)
+WEB_PORT      = cfg.get("web_port", 8050)
 SESSION_START = cfg.get("session_start", "15:30")
 SESSION_END   = cfg.get("session_end", "22:00")
 
@@ -76,10 +76,8 @@ def poll():
 
             with state_lock:
                 tracked = set(price_history.keys())
-                # positions that disappeared → mark closed
                 for sym in tracked - open_symbols:
                     closed_symbols.add(sym)
-                # record new prices
                 for sym, price in prices.items():
                     price_history[sym].append((now, price))
 
@@ -96,7 +94,24 @@ app.title = "Position Monitor"
 app.layout = html.Div(
     style={"fontFamily": "Arial, sans-serif", "padding": "20px", "backgroundColor": "#fafafa"},
     children=[
-        html.H2("Open Position Price Monitor", style={"marginBottom": "4px"}),
+        html.Div(
+            style={"display": "flex", "alignItems": "center", "marginBottom": "4px", "gap": "24px"},
+            children=[
+                html.H2("Open Position Price Monitor", style={"margin": "0"}),
+                dcc.RadioItems(
+                    id="display-mode",
+                    options=[
+                        {"label": "Price", "value": "price"},
+                        {"label": "Relative (Base 100)", "value": "relative"},
+                    ],
+                    value="price",
+                    inline=True,
+                    style={"fontSize": "14px"},
+                    inputStyle={"marginRight": "4px"},
+                    labelStyle={"marginRight": "16px"},
+                ),
+            ],
+        ),
         html.P(
             id="last-update",
             style={"color": "#888", "fontSize": "13px", "marginBottom": "16px"}
@@ -114,8 +129,9 @@ app.layout = html.Div(
     Output("price-chart", "figure"),
     Output("last-update", "children"),
     Input("interval", "n_intervals"),
+    Input("display-mode", "value"),
 )
-def update_chart(_n):
+def update_chart(_n, display_mode):
     fig = go.Figure()
 
     today = date.today()
@@ -132,16 +148,24 @@ def update_chart(_n):
         is_closed = symbol in closed_snapshot
         times  = [h[0] for h in history]
         prices = [h[1] for h in history]
-        label  = f"{symbol} (closed)" if is_closed else symbol
+
+        if display_mode == "relative":
+            base = prices[0]
+            y_values = [round((p / base) * 100, 2) for p in prices]
+        else:
+            y_values = prices
+
+        label = f"{symbol} (closed)" if is_closed else symbol
         fig.add_trace(go.Scatter(
             x=times,
-            y=prices,
-            mode="lines+markers",
+            y=y_values,
+            mode="lines",
             name=label,
             line=dict(dash="dot" if is_closed else "solid", width=2),
             opacity=0.5 if is_closed else 1.0,
-            marker=dict(size=5),
         ))
+
+    y_title = "Base 100 (% relative)" if display_mode == "relative" else "Price"
 
     fig.update_layout(
         xaxis=dict(
@@ -150,7 +174,7 @@ def update_chart(_n):
             range=[x_start, x_end],
             tickformat="%H:%M",
         ),
-        yaxis=dict(title="Price"),
+        yaxis=dict(title=y_title),
         legend=dict(title="Symbol", orientation="v"),
         template="plotly_white",
         margin=dict(l=60, r=20, t=20, b=60),
@@ -171,11 +195,10 @@ def main():
         sys.exit(1)
 
     print("Connected. Running initial poll …")
-    poll()  # first snapshot immediately (won't return — uses ib.sleep loop)
+    poll()
 
 
 if __name__ == "__main__":
-    # Dash server runs in background thread
     dash_thread = threading.Thread(
         target=lambda: app.run(
             host="127.0.0.1",
@@ -187,7 +210,6 @@ if __name__ == "__main__":
     )
     dash_thread.start()
 
-    # Open browser after a short delay
     def open_browser():
         import time
         time.sleep(2)
