@@ -10,7 +10,7 @@ import sys
 import threading
 import webbrowser
 from collections import defaultdict
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import yaml
 from ib_insync import IB
@@ -142,12 +142,25 @@ def update_chart(_n, display_mode):
     fig = go.Figure()
 
     today = date.today()
-    x_start = f"{today} {SESSION_START}:00"
-    x_end   = f"{today} {SESSION_END}:00"
+    session_start_dt = datetime.combine(today, datetime.strptime(SESSION_START, "%H:%M").time())
+    session_end_dt   = datetime.combine(today, datetime.strptime(SESSION_END,   "%H:%M").time())
 
     with state_lock:
         history_snapshot = {k: list(v) for k, v in price_history.items()}
         closed_snapshot  = set(closed_symbols)
+
+    all_times = [t for hist in history_snapshot.values() for t, _ in hist]
+
+    if all_times:
+        data_min = min(all_times)
+        data_max = max(all_times)
+        span = max((data_max - data_min).total_seconds(), 300)  # at least 5 min window
+        pad  = timedelta(seconds=span * 0.15)
+        x_start = max(session_start_dt, data_min - pad)
+        x_end   = min(session_end_dt,   data_max + pad)
+    else:
+        x_start = session_start_dt
+        x_end   = session_end_dt
 
     for symbol, history in history_snapshot.items():
         if not history:
@@ -173,6 +186,7 @@ def update_chart(_n, display_mode):
         ))
 
     y_title = "Base 100 (% relative)" if display_mode == "relative" else "Price"
+    interval_label = f"{POLL_SEC}s" if POLL_SEC < 60 else f"{POLL_SEC // 60} min"
 
     fig.update_layout(
         xaxis=dict(
@@ -189,7 +203,7 @@ def update_chart(_n, display_mode):
     )
 
     last = datetime.now().strftime("%H:%M:%S")
-    return fig, f"Last updated: {last}  —  refreshes every {POLL_SEC // 60} min"
+    return fig, f"Last updated: {last}  —  refreshes every {interval_label}"
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
