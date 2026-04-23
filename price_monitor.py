@@ -52,10 +52,14 @@ def open_position_contracts() -> dict[str, object]:
 def fetch_prices(contracts: dict) -> dict[str, float]:
     prices = {}
     for symbol, contract in contracts.items():
-        ticker = ib.reqMktData(contract, "", False, False)
-        ib.sleep(0.3)
-        price = ticker.last if (ticker.last and ticker.last > 0) else ticker.close
-        if price and price > 0:
+        ticker = ib.reqMktData(contract, "233", False, False)
+        ib.sleep(2.0)
+        price = None
+        for val in (ticker.last, ticker.close, ticker.bid, ticker.ask):
+            if val and val > 0:
+                price = val
+                break
+        if price:
             prices[symbol] = price
         ib.cancelMktData(contract)
     return prices
@@ -142,6 +146,7 @@ def update_chart(_n):
     fig.update_layout(
         xaxis=dict(
             title="Time (ET)",
+            type="date",
             range=[x_start, x_end],
             tickformat="%H:%M",
         ),
