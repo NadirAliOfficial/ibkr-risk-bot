@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime, date, timedelta
 
 import yaml
-from ib_insync import IB
+from ib_insync import IB, Stock
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output
@@ -36,9 +36,15 @@ WEB_PORT      = cfg.get("web_port", 8050)
 SESSION_START = cfg.get("session_start", "15:30")
 SESSION_END   = cfg.get("session_end", "22:00")
 
+BENCHMARKS = {
+    "SPY": {"color": "#444444", "label": "SPY (S&P 500)"},
+    "QQQ": {"color": "#888888", "label": "QQQ (Nasdaq)"},
+}
+
 # ── Shared state ──────────────────────────────────────────────────────────────
 
-price_history: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
+price_history:     dict[str, list[tuple[datetime, float]]] = defaultdict(list)
+benchmark_history: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
 closed_symbols: set[str] = set()
 state_lock = threading.Lock()
 
@@ -56,16 +62,31 @@ def _valid(val) -> bool:
     except TypeError:
         return False
 
+def _get_price(ticker) -> float | None:
+    if _valid(ticker.last):
+        return ticker.last
+    if _valid(ticker.bid) and _valid(ticker.ask):
+        return (ticker.bid + ticker.ask) / 2
+    return None
+
 def fetch_prices(contracts: dict) -> dict[str, float]:
     prices = {}
     for symbol, contract in contracts.items():
         ticker = ib.reqMktData(contract, "", False, False)
         ib.sleep(2.0)
-        price = None
-        if _valid(ticker.last):
-            price = ticker.last
-        elif _valid(ticker.bid) and _valid(ticker.ask):
-            price = (ticker.bid + ticker.ask) / 2
+        price = _get_price(ticker)
+        if price:
+            prices[symbol] = price
+        ib.cancelMktData(contract)
+    return prices
+
+def fetch_benchmark_prices() -> dict[str, float]:
+    prices = {}
+    for symbol in BENCHMARKS:
+        contract = Stock(symbol, "SMART", "USD")
+        ticker = ib.reqMktData(contract, "", False, False)
+        ib.sleep(2.0)
+        price = _get_price(ticker)
         if price:
             prices[symbol] = price
         ib.cancelMktData(contract)
@@ -79,6 +100,7 @@ def poll():
             open_contracts = open_position_contracts()
             open_symbols = set(open_contracts.keys())
             prices = fetch_prices(open_contracts)
+            bench_prices = fetch_benchmark_prices()
             now = datetime.now()
 
             with state_lock:
@@ -87,6 +109,8 @@ def poll():
                     closed_symbols.add(sym)
                 for sym, price in prices.items():
                     price_history[sym].append((now, price))
+                for sym, price in bench_prices.items():
+                    benchmark_history[sym].append((now, price))
 
         except Exception as exc:
             print(f"[poll] error: {exc}", flush=True)
@@ -146,15 +170,16 @@ def update_chart(_n, display_mode):
     session_end_dt   = datetime.combine(today, datetime.strptime(SESSION_END,   "%H:%M").time())
 
     with state_lock:
-        history_snapshot = {k: list(v) for k, v in price_history.items()}
-        closed_snapshot  = set(closed_symbols)
+        history_snapshot   = {k: list(v) for k, v in price_history.items()}
+        benchmark_snapshot = {k: list(v) for k, v in benchmark_history.items()}
+        closed_snapshot    = set(closed_symbols)
 
     all_times = [t for hist in history_snapshot.values() for t, _ in hist]
 
     if all_times:
         data_min = min(all_times)
         data_max = max(all_times)
-        span = max((data_max - data_min).total_seconds(), 300)  # at least 5 min window
+        span = max((data_max - data_min).total_seconds(), 300)
         pad  = timedelta(seconds=span * 0.15)
         x_start = max(session_start_dt, data_min - pad)
         x_end   = min(session_end_dt,   data_max + pad)
@@ -162,6 +187,7 @@ def update_chart(_n, display_mode):
         x_start = session_start_dt
         x_end   = session_end_dt
 
+    # ── Position traces ───────────────────────────────────────────────────────
     for symbol, history in history_snapshot.items():
         if not history:
             continue
@@ -184,6 +210,25 @@ def update_chart(_n, display_mode):
             line=dict(dash="dot" if is_closed else "solid", width=2),
             opacity=0.5 if is_closed else 1.0,
         ))
+
+    # ── Benchmark traces (relative mode only) ────────────────────────────────
+    if display_mode == "relative":
+        for symbol, history in benchmark_snapshot.items():
+            if not history:
+                continue
+            times  = [h[0] for h in history]
+            prices = [h[1] for h in history]
+            base   = prices[0]
+            y_values = [round((p / base) * 100, 2) for p in prices]
+            meta = BENCHMARKS[symbol]
+            fig.add_trace(go.Scatter(
+                x=times,
+                y=y_values,
+                mode="lines",
+                name=meta["label"],
+                line=dict(dash="dash", width=1.5, color=meta["color"]),
+                opacity=0.8,
+            ))
 
     y_title = "Base 100 (% relative)" if display_mode == "relative" else "Price"
     interval_label = f"{POLL_SEC}s" if POLL_SEC < 60 else f"{POLL_SEC // 60} min"
