@@ -37,8 +37,8 @@ SESSION_START = cfg.get("session_start", "15:30")
 SESSION_END   = cfg.get("session_end", "22:00")
 
 BENCHMARKS = {
-    "SPY": {"color": "#444444", "label": "SPY (S&P 500)"},
-    "QQQ": {"color": "#888888", "label": "QQQ (Nasdaq)"},
+    "SPY": {"color": "#444444", "label": "SPY (S&P 500)", "primaryExch": "ARCA"},
+    "QQQ": {"color": "#888888", "label": "QQQ (Nasdaq)",  "primaryExch": "NASDAQ"},
 }
 
 # ── Shared state ──────────────────────────────────────────────────────────────
@@ -82,8 +82,8 @@ def fetch_prices(contracts: dict) -> dict[str, float]:
 
 def fetch_benchmark_prices() -> dict[str, float]:
     prices = {}
-    for symbol in BENCHMARKS:
-        contract = Stock(symbol, "SMART", "USD")
+    for symbol, meta in BENCHMARKS.items():
+        contract = Stock(symbol, "SMART", "USD", primaryExch=meta["primaryExch"])
         ticker = ib.reqMktData(contract, "", False, False)
         ib.sleep(2.0)
         price = _get_price(ticker)
