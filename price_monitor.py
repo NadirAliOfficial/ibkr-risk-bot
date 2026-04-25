@@ -83,7 +83,8 @@ def fetch_prices(contracts: dict) -> dict[str, float]:
 def fetch_benchmark_prices() -> dict[str, float]:
     prices = {}
     for symbol, meta in BENCHMARKS.items():
-        contract = Stock(symbol, "SMART", "USD", primaryExch=meta["primaryExch"])
+        contract = Stock(symbol, "SMART", "USD")
+        contract.primaryExch = meta["primaryExch"]
         ticker = ib.reqMktData(contract, "", False, False)
         ib.sleep(2.0)
         price = _get_price(ticker)
