@@ -1,0 +1,23 @@
+# Bridge Bot Configuration
+
+# ON  = filter scan CSV and update entry_params.json
+# OFF = do nothing
+mode: "ON"
+
+# Path to the Scan Bot output directory (where scan_*.csv files are saved)
+scan_output_dir: "C:\\stock_scanner\\output"
+
+# Path to the Entry Bot parameters file (relative or absolute)
+entry_params_file: "entry_params.json"
+
+# Minimum score for a symbol to be selected
+score_threshold: 3
+
+# Only include symbols where CandidateFlag is TRUE (passed all technical filters)
+candidate_flag_only: true
+
+# Maximum number of symbols to pass to the Entry Bot (top N by score)
+max_symbols: 5
+
+# How many trading days ahead to set execution_date (1 = next trading day)
+trading_days_ahead: 1
