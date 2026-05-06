@@ -35,6 +35,7 @@ bot:
   reconnect_delay: 30      # Seconds to wait before reconnecting after disconnect
   order_timeout: 30        # Seconds to wait for order cancel confirmation
   protection_check_interval: 30  # Seconds between protection verification checks
+  trail_rth_only: true          # Only activate trailing stops during RTH (09:30–16:00 NY)
 
 logging:
   level: "INFO"            # DEBUG | INFO | WARNING | ERROR

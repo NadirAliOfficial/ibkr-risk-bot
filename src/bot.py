@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
 from typing import Dict, Optional
 
 from ib_insync import IB, Contract, Order, Position, Ticker, Trade
@@ -34,6 +36,7 @@ class RiskBot:
         self.poll_interval: int = b["poll_interval"]
         self.order_timeout: int = b["order_timeout"]
         self.protection_check_interval: int = b.get("protection_check_interval", 30)
+        self.trail_rth_only: bool = b.get("trail_rth_only", True)
 
         # conid → ManagedPosition
         self._positions: Dict[int, ManagedPosition] = {}
@@ -222,6 +225,8 @@ class RiskBot:
             await self._place_missing_tp(mp)
 
         elif mp.state == State.MONITORING:
+            if self.trail_rth_only and not self._is_rth():
+                return
             last = self._get_last_price(mp)
             if last is None:
                 return
@@ -238,6 +243,8 @@ class RiskBot:
             next_level = mp.current_trail_level + 1
             if next_level >= len(self.trailing_levels):
                 return  # already at max level
+            if self.trail_rth_only and not self._is_rth():
+                return
             last = self._get_last_price(mp)
             if last is None:
                 return
@@ -536,6 +543,13 @@ class RiskBot:
         return trade.orderStatus.status not in terminal
 
     # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _is_rth(self) -> bool:
+        ny = datetime.now(ZoneInfo("America/New_York"))
+        if ny.weekday() >= 5:
+            return False
+        t = ny.time()
+        return dtime(9, 30) <= t < dtime(16, 0)
 
     def _order_contract(self, mp: ManagedPosition) -> Contract:
         """Contract used for placing orders — always SMART routing."""

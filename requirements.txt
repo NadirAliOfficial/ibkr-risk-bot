@@ -1,4 +1,5 @@
 ib_insync>=0.9.86
+tzdata>=2024.1
 PyYAML>=6.0
 openpyxl>=3.1.0
 reportlab>=4.0
