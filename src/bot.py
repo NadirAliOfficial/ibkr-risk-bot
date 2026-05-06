@@ -226,6 +226,7 @@ class RiskBot:
 
         elif mp.state == State.MONITORING:
             if self.trail_rth_only and not self._is_rth():
+                log.debug("%s: outside RTH — trailing activation skipped, TP/SL remain active.", mp.symbol)
                 return
             last = self._get_last_price(mp)
             if last is None:
