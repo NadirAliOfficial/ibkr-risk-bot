@@ -98,11 +98,18 @@ def fetch_benchmark_prices() -> dict[str, float]:
 def poll():
     while True:
         try:
+            now = datetime.now()
+            today = date.today()
+            session_start_dt = datetime.combine(today, datetime.strptime(SESSION_START, "%H:%M").time())
+            session_end_dt   = datetime.combine(today, datetime.strptime(SESSION_END,   "%H:%M").time())
+            if not (session_start_dt <= now <= session_end_dt):
+                ib.sleep(60)
+                continue
+
             open_contracts = open_position_contracts()
             open_symbols = set(open_contracts.keys())
             prices = fetch_prices(open_contracts)
             bench_prices = fetch_benchmark_prices()
-            now = datetime.now()
 
             with state_lock:
                 tracked = set(price_history.keys())
