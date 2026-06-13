@@ -43,15 +43,13 @@ def load_config(path: str) -> dict:
 # ── Process / port detection ──────────────────────────────────────────────────
 
 def is_running(match: str) -> bool:
-    """Return True if any running process (excluding this watchdog) has match in its command line."""
+    """Return True if any running process (excluding this process) has match in its command line."""
     my_pid = os.getpid()
     for proc in psutil.process_iter(["pid", "cmdline"]):
         try:
             if proc.pid == my_pid:
                 continue
             cmdline = " ".join(proc.info["cmdline"] or [])
-            if "watchdog" in cmdline.lower():
-                continue
             if match.lower() in cmdline.lower():
                 return True
         except (psutil.NoSuchProcess, psutil.AccessDenied):
