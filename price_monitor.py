@@ -24,7 +24,7 @@ import plotly.graph_objects as go
 CONFIG_PATH = "price_monitor_config.yaml"
 
 def load_config():
-    with open(CONFIG_PATH) as f:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 cfg = load_config()
@@ -287,7 +287,7 @@ if __name__ == "__main__":
     def open_browser():
         import time
         time.sleep(2)
-        webbrowser.open(f"http://localhost:{WEB_PORT}")
+        webbrowser.open(f"http://localhost:{WEB_PORT}", encoding="utf-8")
     threading.Thread(target=open_browser, daemon=True).start()
 
     print(f"Chart available at http://localhost:{WEB_PORT}")
