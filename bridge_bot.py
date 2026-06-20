@@ -72,7 +72,7 @@ def main():
     setup_logging()
     log = logging.getLogger(__name__)
 
-    with open(CONFIG_PATH) as f:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     if cfg.get("mode", "ON").upper() == "OFF":
@@ -105,7 +105,7 @@ def main():
     exec_date_str = exec_date.strftime("%Y-%m-%d")
 
     ep_path = Path(entry_params_file)
-    with open(ep_path) as f:
+    with open(ep_path, encoding="utf-8") as f:
         entry_params = json.load(f)
 
     entry_params["execution_date"] = exec_date_str
