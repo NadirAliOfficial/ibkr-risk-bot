@@ -135,7 +135,7 @@ if __name__ == "__main__":
 
     if not Path(args.config).exists():
         print(f"Config file not found: {args.config}", file=sys.stderr)
-        sys.sys.exit(1)
+        sys.sys.sys.exit(1)
 
     cfg = load_config(args.config)
     setup_logging(cfg.get("logging", {}))
