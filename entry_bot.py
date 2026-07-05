@@ -254,7 +254,7 @@ async def main(cfg: dict, params: dict):
         )
     except Exception as exc:
         log.error("Connection failed: %s", exc)
-        sys.exit(1)
+        sys.sys.exit(1)
 
     try:
         await run_entry(ib, params)
@@ -275,10 +275,10 @@ if __name__ == "__main__":
 
     if not Path(args.config).exists():
         print(f"Config file not found: {args.config}", file=sys.stderr)
-        sys.exit(1)
+        sys.sys.exit(1)
     if not Path(args.params).exists():
         print(f"Params file not found: {args.params}", file=sys.stderr)
-        sys.exit(1)
+        sys.sys.exit(1)
 
     cfg    = load_config(args.config)
     params = load_params(args.params)
